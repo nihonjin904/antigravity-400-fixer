@@ -20,6 +20,54 @@
 
 ---
 
+## 🔍 典型真實故障案例與解析 (Real-World Case Studies)
+
+以下為本專案在開發與維護過程中，實際攔截並記錄的三類經典故障日誌與技術解析：
+
+### 📋 案例一：Extended Thinking 未閉合思維區塊故障
+> **軌跡識別 (Trajectory ID)**: `21908956-9603-4849-b0ae-46501c93e71c`
+* **日誌特徵**：
+  ```json
+  {
+    "error": {
+      "code": 400,
+      "message": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.137: The final block in an assistant message cannot be `thinking`.\"}}",
+      "status": "INVALID_ARGUMENT"
+    }
+  }
+  ```
+* **深入解析**：當使用者在 IDE 開啟了 **Extended Thinking（延伸思考）**，模型輸出中途斷線（例如：伺服器重啟或 TCP 套接字重置）。由於沒有後續的常規文字欄位，這段中斷歷史被記錄在 SQLite 內，使 `<thinking>` 成為對話的最終狀態。後續對話發送時，API 校驗不符合規範，引發 400 錯誤。
+
+---
+
+### 📋 案例二：不支援 Assistant Prefill 規則限制
+> **軌跡識別 (Trajectory ID)**: `6b950bed-c2fa-48d0-83df-d95d685e37c6`
+* **日誌特徵**：
+  ```json
+  {
+    "error": {
+      "code": 400,
+      "message": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"This model does not support assistant message prefill. The conversation must end with a user message.\"}}",
+      "status": "INVALID_ARGUMENT"
+    }
+  }
+  ```
+* **深入解析**：某些 Claude 與進階生成模型在 API 級別**強制限制對話歷史結構**。對話必須由 User 訊息（使用者輸入）起頭並結尾。若因為 IDE 異常重啟或進程當機，導致對話未能寫入使用者的下一輪發言，而保持在「AI 說話結束」的狀態，API 會將其判定為無效的 Prefill 請求並回絕。
+
+---
+
+### 📋 案例三：網路傳輸層 TCP WSArecv 連線強制關閉
+> **軌跡識別 (Trajectory ID)**: `bfd1ade8-5b65-4f25-82e3-3b4e885540fc`
+* **日誌特徵**：
+  ```text
+  Error: agent executor error: model unreachable: stream reading error: read tcp 10.5.0.2:62420->216.239.36.223:443: wsarecv: An existing connection was forcibly closed by the remote host.
+  Wraps: (3) forced error mark | "model api cannot be reached"
+  Wraps: (12) An existing connection was forcibly closed by the remote host. (syscall.Errno)
+  ```
+* **深入解析**：此故障並非資料庫級別的損壞，而是**底層 TCP/IP 通訊協定層的連線中斷**。當本地 IDE 在與 Google 頂級 API 終端進行長時間的 gRPC / WebSocket 串流通信（Streaming）時，若遭遇本機防火牆阻攔、VPN 代理服務重啟或本地寬頻 IP 漂移，伺服器發送 `RST` 封包強行關閉了通訊通道，導致底層系統呼叫 `wsarecv` 傳回連線重置錯誤，進而引起 AI 無法連線。
+
+---
+
 ## 🛠️ 技術修復與守護架構 (Architecture)
 
 本專案提供**被動還原（Recovery）**與**主動常駐守護（Daemon Auto-Fixer）**雙重安全防禦機制：
