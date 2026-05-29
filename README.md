@@ -56,7 +56,7 @@
 
 ---
 
-### 📋 案例三：網路傳輸層 TCP WSArecv 連線強制關閉
+### 📋 案例三：網路傳輸層 TCP WSArecv 連線強制關閉 (WSArecv Connection Reset)
 > **軌跡識別 (Trajectory ID)**: `bfd1ade8-5b65-4f25-82e3-3b4e885540fc`
 * **日誌特徵**：
   ```text
@@ -64,7 +64,31 @@
   Wraps: (3) forced error mark | "model api cannot be reached"
   Wraps: (12) An existing connection was forcibly closed by the remote host. (syscall.Errno)
   ```
-* **深入解析**：此故障並非資料庫級別的損壞，而是**底層 TCP/IP 通訊協定層的連線中斷**。當本地 IDE 在與 Google 頂級 API 終端進行長時間的 gRPC / WebSocket 串流通信（Streaming）時，若遭遇本機防火牆阻攔、VPN 代理服務重啟或本地寬頻 IP 漂移，伺服器發送 `RST` 封包強行關閉了通訊通道，導致底層系統呼叫 `wsarecv` 傳回連線重置錯誤，進而引起 AI 無法連線。
+* **這個問題是什麼？**
+  * **底層 Windows Socket 斷線 (WSArecv 10054)**：`WSArecv` 是 Windows 套接字（Winsock）API 中用於接收資料的底層系統呼叫。當傳回 `An existing connection was forcibly closed by the remote host` 時，代表本地端與 Google Cloud Vertex AI / 模型 API 伺服器之間的 TCP 連線被**強行發送 RST（重置）封包中斷**。
+  * **誘發根因**：通常是由於本地網路代理（VPN）連線抖動、本機防火牆策略攔截、寬頻 IP 漂移，或者 Google 伺服器端因超時主動踢掉連線。
+
+* **🔗 它與「HTTP 400 Bad Request」的因果關係是什麼？**
+  * **「WSArecv 斷線」是「因」，「HTTP 400 報錯」是「果」**。
+  * 當底層 TCP 連線因 `WSArecv` 崩潰斷開時，AI 的回答被無情卡在半空中。此時，IDE 程式碼在對話 SQLite 資料庫（`conversations/*.db` 的 `steps` 表）寫入中斷，導致最後一條 Assistant 訊息只殘留了 `<thinking>` 區塊，卻沒有後續正常的 markdown 內容（或缺失下一個 User 發言回合）。
+  * 在下次你再度發送訊息時，IDE 會將這段損壞的「未完結/以 thinking 結尾」的歷史紀錄發給 Google/Claude API，進而觸發 API 的防禦規則，拋出 `HTTP 400 Bad Request`，導致整條對話被永久卡死。
+
+* **🛠️ 本專案的 PowerShell (PS) 與 Python (Py) 守護進程是怎麼自動修復的？**
+  我們無法阻止實體層的網路斷線（這是硬體與伺服器端決定的），但我們建立了一套 **「全自動災後重置與熱還原」** 守護系統，在斷線引發 400 錯誤的當下，秒級完成修復：
+
+  1. **常駐守護與拉起機制 (PowerShell - `start-sync.ps1`)**：
+     * **PID 隔離與清理**：透過將進程的 PID 精確寫入本地 `%USERPROFILE%/.gemini/antigravity/conversations/auto_fix_pid.txt` 檔案，確保每次重啟同步服務時，能 100% 殺死舊的背景進程，解決端口（Port 18998/18999）被佔用死鎖的問題。
+     * **無感背景執行**：使用 `-WindowStyle Minimized` / `Hidden` 拉起守護進程，確保不殘留任何黑色 CMD 視窗，完全不干擾使用者遊戲與開發。
+
+  2. **毫秒級日誌與資料庫監聽 (Python - `auto_fix_antigravity_400.py`)**：
+     * **熱日誌 Polling 監聽**：每 2 秒輪詢一次 `AppData\Local\Programs\Antigravity\logs\` 目錄中最近 5 秒內被修改的 `.log` 檔案。
+     * **特徵正則掃描 (Regex Detection)**：利用正則表達式掃描日誌中是否包含 `wsarecv`、`thinking`、`prefill` 等關鍵特徵。若日誌尚未寫入，還會主動用 SQLite API 讀取當前最活躍資料庫 `steps` 表，解析最新的一筆 step，校驗 `status` 是否為 Error (status=7)。
+     * **強制進程解除鎖定 (Unlock File Lock)**：一旦發現災情，自動執行 `taskkill /f /im Antigravity.exe /im node.exe /im antigravity_tools.exe`，強行終止所有正在佔用並鎖定對話資料庫的進程。
+     * **物理物理抹除與熱重啟 (Purge & Relaunch)**：
+       * 從日誌中提取受災的對話 UUID。
+       * 物理刪除該損壞的 `.db`、以及暫存的 `.db-wal`（預寫日誌）、`.db-shm`（共享記憶體快取）。
+       * 自動重新啟動 `Antigravity.exe`。
+       * 調用 `tools\notify.ps1` 通過 Windows 系統 Toast 通知機制發送：「**✅ 400 錯誤已自動修復，並已重新啟動 IDE！**」，讓使用者全程無感、直接回歸開發！
 
 ---
 
