@@ -25,7 +25,7 @@
 以下為本專案在開發與維護過程中，實際攔截並記錄的三類經典故障日誌與技術解析：
 
 ### 📋 案例一：Extended Thinking 未閉合思維區塊故障
-> **軌跡識別 (Trajectory ID)**: `21908956-9603-4849-b0ae-46501c93e71c`
+> **軌跡識別 (Trajectory ID)**: `[已隱藏]`
 * **日誌特徵**：
   ```json
   {
@@ -41,7 +41,7 @@
 ---
 
 ### 📋 案例二：不支援 Assistant Prefill 規則限制
-> **軌跡識別 (Trajectory ID)**: `6b950bed-c2fa-48d0-83df-d95d685e37c6`
+> **軌跡識別 (Trajectory ID)**: `[已隱藏]`
 * **日誌特徵**：
   ```json
   {
@@ -57,10 +57,10 @@
 ---
 
 ### 📋 案例三：網路傳輸層 TCP WSArecv 連線強制關閉 (WSArecv Connection Reset)
-> **軌跡識別 (Trajectory ID)**: `bfd1ade8-5b65-4f25-82e3-3b4e885540fc`
+> **軌跡識別 (Trajectory ID)**: `[已隱藏]`
 * **日誌特徵**：
   ```text
-  Error: agent executor error: model unreachable: stream reading error: read tcp 10.5.0.2:62420->216.239.36.223:443: wsarecv: An existing connection was forcibly closed by the remote host.
+  Error: agent executor error: model unreachable: stream reading error: read tcp [本機IP]:[端口]->[伺服器IP]:443: wsarecv: An existing connection was forcibly closed by the remote host.
   Wraps: (3) forced error mark | "model api cannot be reached"
   Wraps: (12) An existing connection was forcibly closed by the remote host. (syscall.Errno)
   ```
